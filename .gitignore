@@ -1,4 +1,5 @@
 node_modules
+.pnpm-store
 *.log
 .nuxt
 nuxt.d.ts
@@ -18,3 +19,6 @@ dist
 # Local editor
 *.code-workspace
 .idea/
+
+.wrangler
+test-results/

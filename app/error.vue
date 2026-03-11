@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { ParsedContent } from '@nuxt/content'
 import type { NuxtError } from '#app'
 
 useSeoMeta({
@@ -9,38 +8,54 @@ useSeoMeta({
 
 defineProps<{ error: NuxtError }>()
 
-const { headerLinks, searchGroups, searchLinks } = useNavigation()
+const route = useRoute()
+const { version } = useDocsVersion()
+const { searchGroups, searchLinks, searchTerm } = useNavigation()
+const { fetchList: fetchModules } = useModules()
+const { fetchList: fetchHosting } = useHostingProviders()
 
-const { data: navigation } = await useLazyAsyncData('navigation', () => fetchContentNavigation(), { default: () => [] })
-const { data: files } = useLazyFetch<ParsedContent[]>('/api/search.json', { default: () => [], server: false })
+const [{ data: navigation }, { data: files }] = await Promise.all([
+  useFetch('/api/navigation.json'),
+  useFetch('/api/search.json', { server: false })
+])
 
-provide('navigation', navigation)
+onNuxtReady(() => {
+  fetchModules()
+  fetchHosting()
+})
+
+const versionNavigation = computed(() => navigation.value?.filter(item => item.path === version.value.path || item.path === '/blog') ?? [])
+const versionFiles = computed(() => files.value?.filter((file) => {
+  return file.id.startsWith(version.value.path + '/') || file.id.startsWith('/blog/')
+}) ?? [])
+
+provide('navigation', versionNavigation)
 </script>
 
 <template>
-  <div>
-    <AppHeader :links="headerLinks" />
+  <UApp>
+    <div :class="[(route.path.startsWith('/docs/') || route.path.startsWith('/deploy')) && 'root']">
+      <Header />
 
-    <UContainer>
-      <UMain>
-        <UPage>
-          <UPageError :error="error" />
-        </UPage>
-      </UMain>
-    </UContainer>
+      <UError :error="error" />
 
-    <AppFooter />
+      <AppFooter />
 
-    <ClientOnly>
-      <UContentSearch
-        :files="files"
-        :navigation="navigation[0]?.children"
-        :groups="searchGroups"
-        :links="searchLinks"
-        :fuse="{ resultLimit: 13 }"
-      />
-
-      <UNotifications />
-    </ClientOnly>
-  </div>
+      <ClientOnly>
+        <LazyUContentSearch
+          v-model:search-term="searchTerm"
+          :files="versionFiles"
+          :navigation="versionNavigation"
+          :groups="searchGroups"
+          :links="searchLinks"
+          :fuse="{
+            resultLimit: 42,
+            fuseOptions: {
+              threshold: 0
+            }
+          }"
+        />
+      </ClientOnly>
+    </div>
+  </UApp>
 </template>

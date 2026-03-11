@@ -1,56 +1,66 @@
 <script setup lang="ts">
-import { debounce } from 'perfect-debounce'
-import type { ParsedContent } from '@nuxt/content'
-import './styles/twoslash.css'
-
-const search = ref(null)
 const colorMode = useColorMode()
-const { headerLinks, searchGroups, searchLinks } = useNavigation()
+const { version } = useDocsVersion()
+const { searchGroups, searchLinks, searchTerm } = useNavigation()
+const { fetchList: fetchModules } = useModules()
+const { fetchList: fetchHosting } = useHostingProviders()
+const { track } = useAnalytics()
+
 const color = computed(() => colorMode.value === 'dark' ? '#020420' : 'white')
 
-const { data: navigation } = await useLazyAsyncData('navigation', () => fetchContentNavigation(), { default: () => [] })
-const { data: files } = useLazyFetch<ParsedContent[]>('/api/search.json', {
-  default: () => [],
-  server: false
+watch(() => colorMode.preference, (newMode, oldMode) => {
+  if (oldMode && newMode !== oldMode) {
+    track('Color Mode Changed', { mode: newMode })
+  }
+})
+
+const [{ data: navigation }, { data: files }] = await Promise.all([
+  useFetch('/api/navigation.json'),
+  useFetch('/api/search.json', { server: false })
+])
+
+onNuxtReady(() => {
+  fetchModules()
+  fetchHosting()
 })
 
 useHead({
   titleTemplate: title => title ? `${title} · Nuxt` : 'Nuxt: The Intuitive Web Framework',
   meta: [
-    { name: 'viewport', content: 'width=device-width, initial-scale=1' },
     { key: 'theme-color', name: 'theme-color', content: color }
-  ],
-  link: [
-    { rel: 'icon', type: 'image/png', href: '/icon.png' }
-  ],
-  htmlAttrs: {
-    lang: 'en'
-  }
+  ]
 })
 
-useSeoMeta({
-  ogSiteName: 'Nuxt',
-  ogType: 'website',
-  twitterCard: 'summary_large_image',
-  twitterSite: 'nuxt_js'
-})
+if (import.meta.server) {
+  useHead({
+    meta: [
+      { name: 'viewport', content: 'width=device-width, initial-scale=1' }
+    ],
+    link: [
+      { rel: 'icon', type: 'image/png', href: '/icon.png' }
+    ],
+    htmlAttrs: {
+      lang: 'en'
+    }
+  })
+  useSeoMeta({
+    ogSiteName: 'Nuxt',
+    ogType: 'website',
+    twitterCard: 'summary_large_image',
+    twitterSite: 'nuxt_js'
+  })
+}
 
-watch(() => search.value?.commandPaletteRef?.query, debounce((query: string) => {
-  if (!query) {
-    return
-  }
+const versionNavigation = computed(() => navigation.value?.filter(item => item.path === version.value.path || item.path === '/blog') ?? [])
+const versionFiles = computed(() => files.value?.filter((file) => {
+  return file.id.startsWith(version.value.path + '/') || file.id.startsWith('/blog/')
+}) ?? [])
 
-  useTrackEvent('Search', { props: { query: `${query} - ${search.value?.commandPaletteRef.results.length} results` } })
-}, 500))
+provide('navigation', versionNavigation)
 
-// Provide
-provide('navigation', navigation)
-
-const route = useRoute()
-const heroBackgroundClass = computed(() => route.meta?.heroBackground || '')
-const { isLoading } = useLoadingIndicator()
 const appear = ref(false)
 const appeared = ref(false)
+
 onMounted(() => {
   setTimeout(() => {
     appear.value = true
@@ -62,62 +72,35 @@ onMounted(() => {
 </script>
 
 <template>
-  <div>
-    <NuxtLoadingIndicator />
+  <UApp>
+    <NuxtLoadingIndicator color="var(--ui-primary)" />
 
-    <AppBanner
-      id="nuxt-tips-christmas"
-      to="https://michaelnthiessen.com/nuxt-tips-collection?aff=J0Emk"
-    >
-      <div class="flex items-center gap-1 text-black">
-        <UIcon
-          name="i-ph-magic-wand"
-          class="w-5 h-5 flex-shrink-0 pointer-events-none hidden lg:inline-block mr-1"
-        />
-        <span>Learn Nuxt with a Collection of 100+ Tips!</span>
-        <UButton
-          label="Learn more"
-          color="white"
-          trailing-icon="i-ph-arrow-right"
-          size="2xs"
-          class="rounded-full ml-1"
-        />
-      </div>
-    </AppBanner>
-
-    <AppHeader :links="headerLinks" />
-
-    <UMain class="relative">
-      <HeroBackground
-        class="absolute w-full top-[1px] transition-all text-primary flex-shrink-0"
-        :class="[
-          isLoading ? 'animate-pulse' : (appear ? 'opacity-100' : 'opacity-0'),
-          appeared ? 'duration-[400ms]': 'duration-1000',
-          heroBackgroundClass
-        ]"
-      />
+    <NuxtLayout>
       <NuxtPage />
-    </UMain>
-
-    <AppFooter />
+    </NuxtLayout>
 
     <ClientOnly>
-      <UContentSearch
-        ref="search"
-        :files="files"
-        :navigation="navigation[0]?.children"
+      <LazyUContentSearch
+        v-model:search-term="searchTerm"
+        :files="versionFiles"
+        :navigation="versionNavigation"
         :groups="searchGroups"
         :links="searchLinks"
-        :fuse="{ resultLimit: 13 }"
+        :fuse="{
+          resultLimit: 42,
+          fuseOptions: {
+            threshold: 0
+          }
+        }"
       />
-
-      <UNotifications />
     </ClientOnly>
-  </div>
+  </UApp>
 </template>
 
 <style>
-#kapa-widget-container {
-  visibility: hidden;
+@media (min-width: 1024px) {
+  .root {
+    --ui-header-height: 112px;
+  }
 }
 </style>

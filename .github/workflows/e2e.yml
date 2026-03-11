@@ -10,18 +10,38 @@ on:
   deployment_status:
 
 jobs:
-  lighthouse:
+  e2e:
     environment:
       name: ${{ github.event.deployment.environment || 'Production' }}
-      url: ${{ github.event.inputs.url || github.event.deployment.payload.web_url || github.event.deployment_status.target_url }}
+      url: ${{ github.event.inputs.url || github.event.deployment_status.environment_url }}
     if: github.event.deployment_status.state == 'success' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Audit URLs using Lighthouse
-        uses: treosh/lighthouse-ci-action@v12
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - run: corepack enable
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
-          urls: ${{ github.event.inputs.url || github.event.deployment.payload.web_url || github.event.deployment_status.target_url }}
+          node-version: lts/-1
+          cache: 'pnpm'
+      - run: pnpm install
+      - run: pnpm exec playwright install
+      - name: Run Playwright E2E tests
+        run: pnpm test:browser
+        env:
+          BASE_URL: ${{ github.event.inputs.url || github.event.deployment_status.environment_url }}
+
+  lighthouse:
+    environment:
+      name: ${{ github.event.deployment.environment || 'Production' }}
+      url: ${{ github.event.inputs.url || github.event.deployment_status.environment_url }}
+    if: github.event.deployment_status.state == 'success' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Audit URLs using Lighthouse
+        uses: treosh/lighthouse-ci-action@fcd65974f7c4c2bf0ee9d09b84d2489183c29726 # v12
+        with:
+          urls: ${{ github.event.inputs.url || github.event.deployment_status.environment_url }}
           uploadArtifacts: true
           temporaryPublicStorage: true
         env:
@@ -30,7 +50,7 @@ jobs:
   warmup:
     environment:
       name: ${{ github.event.deployment.environment || 'Production' }}
-      url: ${{ github.event.inputs.url || github.event.deployment.payload.web_url || github.event.deployment_status.target_url }}
+      url: ${{ github.event.inputs.url || github.event.deployment_status.environment_url }}
     if: github.event.deployment_status.state == 'success' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
@@ -39,6 +59,6 @@ jobs:
         run: |
           curl -sS $BASE_URL/api/jobs
           curl -sS $BASE_URL/api/sponsors
-          curl -sS $BASE_URL/api/modules
+          curl -sS $BASE_URL/api/v1/modules
         env:
-          BASE_URL: ${{ github.event.inputs.url || github.event.deployment.payload.web_url || github.event.deployment_status.target_url }}
+          BASE_URL: ${{ github.event.inputs.url || github.event.deployment_status.environment_url }}

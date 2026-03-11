@@ -1,15 +1,11 @@
-import { serverQueryContent } from '#content/server'
+// This route will be pre-rendered as /api/navigation.json
+import { queryCollectionSearchSections } from '@nuxt/content/server'
 
-export default eventHandler(async (event) => {
-  return await serverQueryContent(event, '/docs').where({
-    _type: 'markdown',
-    _path: {
-      $and: [{
-        $ne: new RegExp('^/docs/bridge')
-      }, {
-        $ne: new RegExp('^/docs/migration')
-      }]
-    },
-    navigation: { $ne: false }
-  }).find()
+export default defineEventHandler(async (event) => {
+  return Promise.all([
+    queryCollectionSearchSections(event, 'docsv3', { ignoredTags: ['style'] }),
+    queryCollectionSearchSections(event, 'docsv4', { ignoredTags: ['style'] }),
+    queryCollectionSearchSections(event, 'docsv5', { ignoredTags: ['style'] }),
+    queryCollectionSearchSections(event, 'blog')
+  ]).then(data => data.flat())
 })

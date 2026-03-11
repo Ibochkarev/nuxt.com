@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps({
+const props = defineProps({
   value: {
     type: String,
     required: true
@@ -9,26 +9,44 @@ defineProps({
     required: false
   },
   size: {
-    type: String as () => 'lg',
+    type: String as PropType<'lg' | 'xl'>,
     default: 'lg'
   }
 })
 const { copy, copied } = useClipboard()
+const { track } = useAnalytics()
+
+function copyValue() {
+  track('Command Copied', { value: props.value })
+  copy(props.value)
+}
 </script>
 
 <template>
   <label>
-    <UInput :model-value="label ? label : value" :size="size" disabled :ui="{ icon: { trailing: { pointer: '' } } }" icon="i-ph-terminal">
-      <div class="absolute inset-0" :class="[copied ? 'cursor-default' : 'cursor-copy']" @click="copy(value)" />
+    <UInput
+      class="w-full"
+      :model-value="label ? label : value"
+      :size="size"
+      disabled
+      icon="i-lucide-terminal"
+      :ui="{
+        base: copied ? 'ring-primary' : ''
+      }"
+    >
+      <div class="absolute inset-0" :class="[copied ? 'cursor-default' : 'cursor-copy']" @click="copyValue" />
       <template #trailing>
         <UButton
-          :icon="copied ? 'i-ph-check' : 'i-ph-copy'"
-          color="gray"
+          :icon="copied ? 'i-lucide-check' : 'i-lucide-copy'"
+          color="neutral"
           variant="link"
           :padded="false"
-          :class="{ 'text-green-500 hover:text-green-500 dark:text-green-400 hover:dark:text-green-400': copied }"
+          :class="{
+            '!text-primary cursor-default': copied,
+            'cursor-copy': !copied
+          }"
           aria-label="copy button"
-          @click="copy(value)"
+          @click="copyValue"
         />
       </template>
     </UInput>

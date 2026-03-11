@@ -3,7 +3,7 @@ import { vIntersectionObserver } from '@vueuse/components'
 
 const getImage = useImage()
 const start = ref(0)
-const total = 5 * 4
+const total = 6 * 4
 const contributors = useState('contributors-grid', () => [])
 const intersecting = ref(false)
 let _contributors
@@ -16,15 +16,14 @@ function onIntersectionObserver([{ isIntersecting }]) {
       contributors.value = _contributors
     }
     startTimer()
-  }
-  else {
+  } else {
     stopTimer()
   }
 }
 // Fetch on client-side
 onMounted(async () => {
   if (contributors.value.length) return
-  _contributors = await $fetch('https://api.nuxt.com/contributors').then(data => data.slice(0, total * 10).map(c => c.username))
+  _contributors = await $fetch('/api/contributors').then(data => data.slice(0, total * 10).map(c => c.username))
   await loadImages(_contributors.slice(0, total))
   if (!contributors.value.length && intersecting.value) {
     contributors.value = _contributors
@@ -32,7 +31,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(stopTimer)
 
-const $contributors = computed(() => contributors.value.length ? contributors.value.slice(start.value, start.value + total) : new Array(total).fill(null))
+const $contributors = computed(() => contributors.value.length ? contributors.value.slice(start.value, start.value + total) : Array.from({ length: total }).fill(null))
 function startTimer(ms = 5000) {
   currentTimeout = setTimeout(nextContributors, ms)
 }
@@ -63,7 +62,7 @@ async function nextContributors() {
 <template>
   <div
     v-intersection-observer="onIntersectionObserver"
-    class="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-10 lg:grid-cols-5 gap-4 sm:gap-5 lg:gap-8"
+    class="grid grid-cols-6 md:grid-cols-8 lg:grid-cols-6 gap-4 sm:gap-8 lg:gap-6 xl:gap-8 xl:p-8"
     @mouseenter="stopTimer()"
     @mouseleave="startTimer(2500)"
   >
@@ -92,13 +91,13 @@ async function nextContributors() {
               :src="`/gh_avatar/${username}`"
               provider="ipx"
               densities="x1 x2"
-              height="80px"
+              height="80"
               format="auto"
-              width="80px"
+              width="80"
               :alt="username"
               loading="lazy"
               :title="username"
-              class="rounded-xl w-full h-full transition lg:hover:scale-125"
+              class="rounded-xl w-full h-full transition lg:hover:scale-125 bg-muted"
             />
           </UTooltip>
         </a>

@@ -16,7 +16,7 @@ Integration with Cloudflare Pages is possible with zero configuration, [learn mo
 ::
 
 ::important
-Checkout the [@nuxthub/core](/modules/hub) module to build full-stack Nuxt applications with Cloudflare, learn more on [hub.nuxt.com](https://hub.nuxt.com).
+Use [@nuxthub/core](/modules/hub) to add database, KV, blob storage, and cache to your Nuxt application. NuxtHub works on Vercel, Cloudflare, Netlify, and more. Learn more on [hub.nuxt.com](https://hub.nuxt.com).
 ::
 
 ### Git Integration
@@ -122,6 +122,6 @@ Head over **CloudFlare Pages** documentation to learn more about it.
 
 ## Learn more
 
-::read-more{to="https://nitro.unjs.io/deploy/providers/cloudflare" target="_blank"}
+::read-more{to="https://v2.nitro.build/deploy/providers/cloudflare" target="_blank"}
 Head over **Nitro documentation** to learn more about the cloudflare deployment preset.
 ::

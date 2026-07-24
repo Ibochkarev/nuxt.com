@@ -3,15 +3,24 @@ import { parseMdc } from './helpers/mdc-parser.mjs'
 
 const { resolve } = createResolver(import.meta.url)
 
+// In `--ui-only` mode (default `pnpm dev`), skip the `eve/nuxt` module so the
+// Eve agent runtime is never spawned locally. The UI and server routes from
+// `layers/nuxi` are still loaded — only the agent itself is disabled.
+// `--with-nuxi` (`pnpm dev:nuxi`) re-enables the agent while keeping ui-only proxies.
+const uiOnly = process.argv.includes('--ui-only')
+const withNuxi = process.argv.includes('--with-nuxi')
+const nuxiEnabled = !uiOnly || withNuxi
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
+  extends: ['./layers/nuxi'],
+
   modules: [
     '@nuxt/ui',
-    'nuxt-content-twoslash',
+    // 'nuxt-content-twoslash',
     '@nuxt/test-utils',
     '@nuxt/content',
     '@nuxt/image',
-    '@nuxtjs/plausible',
     '@nuxt/eslint',
     '@nuxt/scripts',
     '@nuxtjs/turnstile',
@@ -22,9 +31,15 @@ export default defineNuxtConfig({
     '@nuxthub/core',
     'nuxt-charts',
     'nuxt-auth-utils',
+    'nuxt-schema-org',
     '@nuxtjs/mcp-toolkit',
-    '@nuxt/hints'
+    '@nuxt/hints',
+    '@vercel/analytics',
+    '@vercel/speed-insights',
+    'evlog/nuxt',
+    ...(nuxiEnabled ? ['eve/nuxt'] : [])
   ],
+
   $development: {
     site: {
       url: 'http://localhost:3000'
@@ -61,6 +76,12 @@ export default defineNuxtConfig({
     layoutTransition: false
   },
   css: ['~/assets/css/main.css'],
+  site: {
+    name: 'Nuxt',
+    url: 'https://nuxt.com',
+    description: 'Build fast, production-ready web apps with Vue. File-based routing, auto-imports, and server-side rendering — all configured out of the box.',
+    defaultLocale: 'en'
+  },
   colorMode: {
     preference: 'dark'
   },
@@ -91,9 +112,19 @@ export default defineNuxtConfig({
     }
   },
   runtimeConfig: {
+    public: {
+      eveEnabled: nuxiEnabled
+    },
     contactEmail: '',
+    mcpAdminToken: '',
+    adminGithubLogins: '',
     github: {
       token: ''
+    },
+    linear: {
+      apiKey: '',
+      teamId: 'f79ad145-d4eb-4bff-88b9-c344f006a777',
+      projectId: '11a6000e-6c95-445e-85f1-a7de5c372bcd'
     },
     newsletter: {
       secret: ''
@@ -108,24 +139,58 @@ export default defineNuxtConfig({
   },
   routeRules: {
     // Pre-render
-    '/': { prerender: true },
+    '/': {
+      prerender: true,
+      headers: {
+        // Relative URIs per RFC 8288 — agents resolve them against the request
+        // origin, so this works on production, preview deploys, and localhost.
+        Link: [
+          '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"',
+          '</.well-known/mcp/server-card.json>; rel="service-desc"; type="application/json"; title="MCP Server Card"',
+          '</llms.txt>; rel="llms"; type="text/plain"',
+          '</llms-full.txt>; rel="llms-full"; type="text/plain"',
+          '</sitemap.xml>; rel="sitemap"; type="application/xml"',
+          '</sitemap.md>; rel="sitemap"; type="text/markdown"',
+          '</design.md>; rel="design"; type="text/markdown"',
+          '</mcp>; rel="mcp"; type="application/json"',
+          '</docs>; rel="service-doc"; type="text/html"'
+        ].join(', '),
+        Vary: 'Accept, User-Agent'
+      }
+    },
     '/blog/rss.xml': { prerender: true },
     '/sitemap.xml': { prerender: true },
+    '/sitemap.md': { prerender: true },
+    '/design.md': { prerender: true, headers: { Vary: 'Accept, User-Agent' } },
     '/404.html': { prerender: true },
     '/docs/3.x/getting-started/introduction': { prerender: true },
     '/docs/4.x/getting-started/introduction': { prerender: true },
     '/docs/5.x/getting-started/introduction': { prerender: true },
-    '/modules': { prerender: true },
+    '/docs/4.x/errors': { prerender: true },
+    '/modules': { isr: 60 * 60, prerender: false, headers: { Vary: 'Accept, User-Agent' } },
     '/modules/**': { isr: 60 * 60 },
-    '/changelog': { isr: 60 * 60 },
+    '/changelog': { isr: 60 * 60, headers: { Vary: 'Accept, User-Agent' } },
+    // Markdown content negotiation routes (md-rewrite.ts emits Vercel rewrites
+    // based on `Accept` and `User-Agent`, so cached responses must vary on both).
+    // /raw/** is the rewrite destination — it must carry Vary too so CDNs
+    // don't serve cached markdown to a browser that asked for HTML.
+    '/docs/**': { headers: { Vary: 'Accept, User-Agent' } },
+    '/blog/**': { headers: { Vary: 'Accept, User-Agent' } },
+    '/deploy/**': { headers: { Vary: 'Accept, User-Agent' } },
+    '/raw/**': { headers: { Vary: 'Accept, User-Agent' } },
     // API
     '/api/v1/teams': { isr: 60 * 60 },
     // Admin
     '/admin': { ssr: false },
     '/admin/**': { ssr: false },
+    '/admin/login': { redirect: '/login?redirect=/admin', prerender: false },
+    // Auth-protected client-side area — never SSR'd.
+    '/dashboard': { ssr: false },
+    '/dashboard/**': { ssr: false },
+    '/_eve_internal/**': { headers: { 'cache-control': 'no-store' } },
+    '/api/internal/**': { headers: { 'cache-control': 'no-store' } },
     // Main navigation
     '/api/navigation.json': { prerender: true },
-    '/api/search.json': { prerender: true },
     // Redirects
     '/docs': { redirect: '/docs/getting-started/introduction', prerender: false },
     '/docs/3.x': { redirect: '/docs/3.x/getting-started/introduction', prerender: false },
@@ -382,6 +447,7 @@ export default defineNuxtConfig({
     '/docs/5.x/getting-started/directory-structure': { redirect: '/docs/4.x/directory-structure', prerender: false },
     '/docs/4.x/guide/going-further/modules': { redirect: '/docs/4.x/guide/modules', prerender: false },
     '/docs/5.x/guide/going-further/modules': { redirect: '/docs/4.x/guide/modules', prerender: false },
+    '/docs/4.x/guide/modules/module-dependencies': { redirect: '/docs/5.x/guide/modules/module-dependencies', prerender: false },
     '/docs/4.x/guide/concepts/rendering-modes': { redirect: '/docs/4.x/guide/concepts/rendering', prerender: false },
     '/docs/5.x/guide/concepts/rendering-modes': { redirect: '/docs/4.x/guide/concepts/rendering', prerender: false },
     '/docs/4.x/guide/directory-structure/nuxt.config': { redirect: '/docs/4.x/directory-structure/nuxt-config', prerender: false },
@@ -398,6 +464,7 @@ export default defineNuxtConfig({
   },
   sourcemap: true,
   experimental: {
+    viewTransition: true,
     extractAsyncDataHandlers: true,
     defaults: {
       nuxtLink: {
@@ -409,10 +476,17 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-01-14',
   nitro: {
     prerender: {
-      crawlLinks: true,
+      crawlLinks: false,
       ignore: [
-        route => route.startsWith('/modules/'),
-        route => route.startsWith('/admin')
+        route => route === '/modules' || route.startsWith('/modules/'),
+        route => route.startsWith('/raw/'),
+        route => route.startsWith('/admin'),
+        route => route.startsWith('/login'),
+        route => route.startsWith('/dashboard'),
+        '/mcp',
+        route => route.startsWith('/mcp/'),
+        route => route.startsWith('/api/auth/'),
+        route => route.startsWith('/api/chats')
       ],
       autoSubfolderIndex: false
     }
@@ -424,7 +498,17 @@ export default defineNuxtConfig({
   },
   vite: {
     optimizeDeps: {
-      exclude: ['vue-chrts']
+      include: [
+        '@comark/vue',
+        '@unhead/schema-org/vue',
+        '@vue/devtools-core',
+        '@vue/devtools-kit',
+        'valibot',
+        'zod',
+        'date-fns',
+        'ai'
+      ],
+      exclude: ['vue-chrts', 'shaders']
     }
   },
   typescript: {
@@ -437,6 +521,8 @@ export default defineNuxtConfig({
     'content:file:beforeParse': async ({ file }) => {
       if (file.id.startsWith('docsv5/')) {
         file.body = file.body.replaceAll(/\(\/docs\/(?!\d\.x)/g, '(/docs/5.x/')
+        // module-dependencies only exists on main (5.x), not on the 4.x branch yet
+        file.body = file.body.replaceAll('/docs/4.x/guide/modules/module-dependencies', '/docs/5.x/guide/modules/module-dependencies')
       }
       if (file.id.startsWith('docsv4/')) {
         file.body = file.body.replaceAll(/\(\/docs\/(?!\d\.x)/g, '(/docs/4.x/')
@@ -460,16 +546,59 @@ export default defineNuxtConfig({
       }
     }
   },
+
+  evlog: {
+    env: { service: 'nuxt-com' },
+    pretty: process.env.CI ? false : undefined,
+    sampling: {
+      rates: { info: 30 },
+      keep: [
+        { path: '/api/chats/*' },
+        { duration: 2000 }
+      ]
+    }
+  },
+  hints: {
+    features: {
+      hydration: true,
+      lazyLoad: false,
+      webVitals: true,
+      thirdPartyScripts: true,
+      htmlValidate: true
+    }
+  },
   icon: {
     customCollections: [{
       prefix: 'custom',
       dir: resolve('./app/assets/icons')
     }],
     clientBundle: {
-      scan: true,
-      includeCustomCollections: true
-    },
-    provider: 'iconify'
+      // Scan app source + all local content for icons. The `**/.*.{yml,yaml}`
+      // pattern is needed for local `.navigation.yml` dotfiles (e.g. blog,
+      // enterprise), which `*.yml` skips under `dot:false`.
+      scan: {
+        globInclude: ['**/*.{vue,jsx,tsx,md,mdc,mdx,yml,yaml,ts}', '**/.*.{yml,yaml}']
+      },
+      includeCustomCollections: true,
+      // Remote docs nav icons (under `.data/`, unreachable by `scan`) — bundle them
+      // so they don't pop in on client-side navigation. Regenerate when docs change.
+      icons: [
+        'logos:bun', 'lucide:alert-triangle', 'lucide:arrow-left-right', 'lucide:bell-dot',
+        'lucide:bug-off', 'lucide:cable', 'lucide:cog', 'lucide:cooking-pot',
+        'lucide:map', 'lucide:panels-top-left', 'lucide:play', 'lucide:ship',
+        'lucide:square-check', 'lucide:square-terminal', 'lucide:test-tube', 'lucide:toggle-right',
+        'simple-icons:codesandbox', 'simple-icons:git', 'simple-icons:google', 'simple-icons:googlechrome',
+        'simple-icons:mdnwebdocs', 'simple-icons:vite', 'simple-icons:w3c', 'simple-icons:webpack',
+        'vscode-icons:default-folder', 'vscode-icons:file-type-dotenv', 'vscode-icons:file-type-git', 'vscode-icons:file-type-light-config',
+        'vscode-icons:file-type-css', 'vscode-icons:file-type-html', 'vscode-icons:file-type-js', 'vscode-icons:file-type-json',
+        'vscode-icons:file-type-markdown', 'vscode-icons:file-type-npm', 'vscode-icons:file-type-nuxt', 'vscode-icons:file-type-tsconfig',
+        'vscode-icons:file-type-typescript', 'vscode-icons:file-type-vue', 'vscode-icons:default-file',
+        'vscode-icons:folder-type-app', 'vscode-icons:folder-type-asset', 'vscode-icons:folder-type-component', 'vscode-icons:folder-type-log',
+        'vscode-icons:folder-type-middleware', 'vscode-icons:folder-type-node', 'vscode-icons:folder-type-nuxt', 'vscode-icons:folder-type-package',
+        'vscode-icons:folder-type-plugin', 'vscode-icons:folder-type-public', 'vscode-icons:folder-type-server', 'vscode-icons:folder-type-shared',
+        'vscode-icons:folder-type-src', 'vscode-icons:folder-type-temp', 'vscode-icons:folder-type-tools', 'vscode-icons:folder-type-view'
+      ]
+    }
   },
   image: {
     format: ['webp', 'jpeg', 'jpg', 'png', 'svg'],
@@ -514,18 +643,42 @@ export default defineNuxtConfig({
   mcp: {
     name: 'Nuxt',
     route: '/mcp',
-    browserRedirect: '/docs/guide/ai/mcp'
+    browserRedirect: '/docs/guide/ai/mcp',
+    icons: [
+      { src: 'https://nuxt.com/icon.png', mimeType: 'image/png', sizes: ['64x64'] }
+    ],
+    logging: true
+  },
+  ogImage: {
+    cacheMaxAgeSeconds: 0,
+    security: {
+      renderTimeout: 60000
+    }
+  },
+  schemaOrg: {
+    identity: {
+      type: 'Organization',
+      name: 'Nuxt',
+      logo: '/icon.png',
+      sameAs: [
+        'https://github.com/nuxt',
+        'https://x.com/nuxt_js',
+        'https://bsky.app/profile/nuxt.com',
+        'https://www.linkedin.com/showcase/nuxt-framework/',
+        'https://m.webtoo.ls/@nuxt'
+      ]
+    }
   },
   turnstile: {
     siteKey: '0x4AAAAAAAP2vNBsTBT3ucZi'
-  },
-  twoslash: {
-    floatingVueOptions: {
-      classMarkdown: 'prose prose-primary dark:prose-invert'
-    },
-    // Skip Twoslash in dev to improve performance. Turn this on when you want to explicitly test twoslash in dev.
-    enableInDev: false,
-    // Do not throw when twoslash fails, the typecheck should be down in github.com/nuxt/nuxt's CI
-    throws: false
   }
+  // twoslash: {
+  //   floatingVueOptions: {
+  //     classMarkdown: 'prose prose-primary dark:prose-invert'
+  //   },
+  //   // Skip Twoslash in dev to improve performance. Turn this on when you want to explicitly test twoslash in dev.
+  //   enableInDev: false,
+  //   // Do not throw when twoslash fails, the typecheck should be down in github.com/nuxt/nuxt's CI
+  //   throws: false
+  // }
 })

@@ -3,6 +3,7 @@ const route = useRoute()
 
 const logo = useTemplateRef('logo')
 const stats = useStats()
+const { loggedIn } = useUserSession()
 const { copy } = useClipboard()
 const { headerLinks } = useHeaderLinks()
 const { track } = useAnalytics()
@@ -65,28 +66,35 @@ function trackGitHubClick() {
     />
 
     <template #right>
-      <UTooltip text="Search" :kbds="['meta', 'K']">
+      <AgentChatButton />
+      <UTooltip text="Search" :kbds="['meta', 'K']" ignore-non-keyboard-focus>
         <UContentSearchButton @click="trackSearchOpen" />
       </UTooltip>
 
-      <UColorModeButton />
+      <template v-if="!loggedIn">
+        <UTooltip text="Toggle theme" :kbds="['d']">
+          <UColorModeButton />
+        </UTooltip>
 
-      <UTooltip text="GitHub Stars">
-        <UButton
-          icon="i-simple-icons-github"
-          to="https://go.nuxt.com/github"
-          target="_blank"
-          variant="ghost"
-          color="neutral"
-          square
-          :label="stats ? formatNumber(stats.stars) : '...'"
-          aria-label="Nuxt on GitHub"
-          :ui="{
-            label: 'hidden sm:inline-flex'
-          }"
-          @click="trackGitHubClick"
-        />
-      </UTooltip>
+        <UTooltip text="GitHub Stars">
+          <UButton
+            icon="i-simple-icons-github"
+            to="https://go.nuxt.com/github"
+            target="_blank"
+            variant="ghost"
+            color="neutral"
+            square
+            :label="stats ? formatNumber(stats.stars) : '...'"
+            aria-label="Nuxt on GitHub"
+            :ui="{
+              label: 'hidden sm:inline-flex'
+            }"
+            @click="trackGitHubClick"
+          />
+        </UTooltip>
+      </template>
+
+      <HeaderUserMenu v-else />
     </template>
 
     <template #toggle="{ open, toggle }">

@@ -11,8 +11,8 @@ if (!page.value) {
   throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
 }
 
-const title = page.value.title
-const description = page.value.description
+const title = page.value.head?.title || page.value.title
+const description = page.value.head?.description || page.value.description
 
 const featuredTemplates = computed(() => templates.value?.filter(template => template.featured) || [])
 const baseTemplates = computed(() => templates.value?.filter(template => !template.featured) || [])
@@ -24,8 +24,8 @@ useSeoMeta({
   ogDescription: description,
   ogTitle: title
 })
-defineOgImageComponent('Docs', {
-  headline: 'Resources',
+useCanonical()
+defineOgImage('Docs.takumi', {
   title,
   description
 })
@@ -34,8 +34,8 @@ defineOgImageComponent('Docs', {
 <template>
   <UContainer v-if="page">
     <UPageHero
-      :title="title"
-      :description="description"
+      :title="page.title"
+      :description="page.description"
       :links="page.links"
     />
     <UPage>

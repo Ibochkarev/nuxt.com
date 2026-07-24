@@ -12,16 +12,14 @@ const title = page.value?.title
 const description = page.value?.description
 
 useSeoMeta({
-  titleTemplate: '%s · Enterprise',
+  titleTemplate: '%s',
   title,
   description,
   ogDescription: description,
-  ogTitle: `${title} · Enterprise`
+  ogTitle: title,
+  ogImage: '/assets/enterprise/support/social-card.png'
 })
-
-defineOgImage({
-  url: '/assets/enterprise/support/social-card.png'
-})
+useCanonical()
 </script>
 
 <template>

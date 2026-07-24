@@ -8,6 +8,9 @@ definePageMeta({
 })
 const { fetchList, articles } = useBlog()
 
+const title = page.value.head?.title || page.value.title
+const description = page.value.head?.description || page.value.description
+
 useHead({
   link: [
     {
@@ -20,15 +23,16 @@ useHead({
 })
 useSeoMeta({
   titleTemplate: '%s',
-  title: page.value.title,
-  description: page.value.description,
-  ogDescription: page.value.description,
-  ogTitle: page.value.title
+  title,
+  description,
+  ogDescription: description,
+  ogTitle: title
 })
-defineOgImageComponent('Docs', {
-  headline: 'Blog',
-  title: page.value.title,
-  description: page.value.description
+useCanonical()
+defineOgImage('Docs.takumi', {
+  headline: 'Updates',
+  title,
+  description
 })
 
 await fetchList()

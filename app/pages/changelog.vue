@@ -6,20 +6,26 @@ definePageMeta({
 })
 
 const title = 'Changelog'
+const seoTitle = `Nuxt ${title}`
 const description = 'Discover the latest releases from Nuxt and the official modules.'
 
 useSeoMeta({
   titleTemplate: '%s',
-  title,
+  title: seoTitle,
   description,
   ogDescription: description,
-  ogTitle: title
+  ogTitle: seoTitle
 })
-defineOgImageComponent('Docs', {
-  headline: 'Changelog',
-  title,
+useCanonical('/raw/changelog.md')
+defineOgImage('Docs.takumi', {
+  headline: 'Updates',
+  title: seoTitle,
   description
 })
+
+if (import.meta.server) {
+  prerenderRoutes(['/raw/changelog.md'])
+}
 
 const { data: releases } = await useFetch('/api/releases')
 const openStates = reactive<Record<string, boolean>>({})

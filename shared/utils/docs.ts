@@ -1,5 +1,7 @@
 // Single source of truth for which Nuxt docs versions are exposed to humans
-// and agents. Bumping this list flips every version-aware surface at once:
+// and agents. "Supported" here means the docs are published and crawlable, not
+// that the release line is maintained: 3.x is end of life but still served.
+// Bumping this list flips every version-aware surface at once:
 //
 //   - app/pages/docs/[...slug].vue        → canonical/markdown alternate emission
 //   - modules/md-rewrite.ts               → Vercel edge rewrites for `.md` and Accept/UA negotiation
@@ -12,7 +14,7 @@ export const SUPPORTED_DOC_VERSIONS = ['3.x', '4.x'] as const
 export const EXCLUDED_DOC_VERSIONS = ['5.x'] as const
 export const CURRENT_DOCS_VERSION: (typeof SUPPORTED_DOC_VERSIONS)[number] = '4.x'
 
-const escape = (v: string) => v.replace(/\./g, '\\.')
+const escape = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // `^/docs/(?:3\.x|4\.x)(?:/|$)` — matches versioned doc paths only.
 export const SUPPORTED_DOCS_PATH_REGEX = new RegExp(

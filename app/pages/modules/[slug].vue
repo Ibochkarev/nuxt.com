@@ -13,6 +13,16 @@ if (!module.value) {
   throw createError({ statusCode: 404, statusMessage: 'Module not found', fatal: true })
 }
 
+// Reassign the ref (not module.value.health = ...): useFetch `data` is a
+// shallowRef, so an in-place nested write would not trigger reactivity.
+const { health } = useModuleHealth()
+watch(health, (map) => {
+  const m = module.value
+  if (m && map[m.name] && m.health !== map[m.name]) {
+    module.value = { ...m, health: map[m.name] }
+  }
+})
+
 const ownerName = computed(() => {
   const [owner, name] = module.value!.repo.split('#')[0].split('/')
   return `${owner}/${name}`
@@ -108,7 +118,17 @@ if (import.meta.server) {
         </template>
       </UAlert>
     </div>
-    <UPageHeader :description="module.description" :ui="{ headline: 'mb-8' }">
+    <UPageHeader
+      :description="module.description"
+      :ui="{
+        headline: 'mb-8',
+        wrapper: isAgentDocked
+          ? 'flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'
+          : 'flex flex-col gap-4 lg:grid lg:grid-cols-12 lg:gap-10 lg:items-center',
+        title: isAgentDocked ? '' : 'lg:col-span-9',
+        links: isAgentDocked ? '' : 'lg:col-span-3 lg:justify-start lg:pl-6'
+      }"
+    >
       <template #headline>
         <UBreadcrumb :items="[{ label: 'Modules', to: '/modules' }, { to: { name: 'modules', query: { category: module.category } }, label: module.category }, { label: module.npm }]" />
       </template>
@@ -119,7 +139,7 @@ if (import.meta.server) {
             :icon="moduleIcon(module.category)"
             :alt="module.name"
             size="xl"
-            class="-m-[4px] rounded-none bg-transparent"
+            class="-m-1 rounded-none bg-transparent"
           />
 
           <div>
@@ -132,9 +152,13 @@ if (import.meta.server) {
         </div>
       </template>
 
+      <template #links>
+        <ModuleInstallGroup :module="module" class="hidden lg:flex" />
+      </template>
+
       <div class="flex flex-col lg:flex-row lg:items-center gap-3 mt-4">
         <UTooltip text="Monthly NPM Downloads">
-          <NuxtLink class="flex items-center gap-1.5" :to="`https://npm.chart.dev/${module.npm}`" target="_blank">
+          <NuxtLink class="flex items-center gap-1.5" :to="`https://npmx.dev/package-stats/${module.npm}/v/${module.stats.version}?granularity=monthly`" target="_blank">
             <UIcon name="i-lucide-circle-arrow-down" class="size-5 shrink-0" />
             <span class="text-sm font-medium">{{ formatNumber(module.stats.downloads) }} downloads</span>
           </NuxtLink>
@@ -158,6 +182,20 @@ if (import.meta.server) {
           </NuxtLink>
         </UTooltip>
 
+        <template v-if="module.health">
+          <span class="hidden lg:block text-muted">&bull;</span>
+          <UTooltip :text="`Health: ${module.health.status} - ${module.health.score}/100`">
+            <NuxtLink
+              :to="`https://nuxt.care/?search=npm:${module.npm}`"
+              class="flex items-center gap-1.5"
+              target="_blank"
+            >
+              <UIcon name="i-lucide-heart-pulse" class="size-5 shrink-0" :style="{ color: module.health.color }" />
+              <span class="text-sm font-medium">{{ module.health.score }}</span>
+            </NuxtLink>
+          </UTooltip>
+        </template>
+
         <div class="mx-3 h-6 border-l border-gray-200 dark:border-gray-800 w-px hidden lg:block" />
 
         <div v-for="(maintainer, index) in module.maintainers" :key="maintainer.github" class="flex items-center gap-3">
@@ -169,6 +207,8 @@ if (import.meta.server) {
           <span v-if="index < module.maintainers.length - 1" class="hidden lg:block text-muted">&bull;</span>
         </div>
       </div>
+
+      <ModuleInstallGroup :module="module" class="w-full mt-6 lg:hidden" />
     </UPageHeader>
 
     <UPage

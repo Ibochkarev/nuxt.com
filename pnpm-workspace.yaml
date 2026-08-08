@@ -4,10 +4,10 @@ strictPeerDependencies: false
 overrides:
   nostics: ^1.2.0
   # chat@4.34.0 pins the 4.1.0-beta.2 prerelease, flagged as a downgrade by check-provenance
-  "@workflow/serde": 4.1.0
+  "@workflow/serde": 4.1.2
 
 allowBuilds:
-  better-sqlite3: true
+  better-sqlite3: false
   esbuild: true
   rolldown: true
   sharp: true
@@ -20,5 +20,8 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - eve@0.24.3 || 0.27.0
   - evlog
-  - '@nuxt/content'
-  - '@nuxt/scripts'
+  - '@nuxt/*'
+  - nuxt
+  - nuxt-nightly
+  - vue
+  - '@vue/*'

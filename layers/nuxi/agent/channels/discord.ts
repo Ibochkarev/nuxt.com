@@ -1,23 +1,25 @@
 import { createDiscordAdapter, type DiscordAdapter } from '@chat-adapter/discord'
 import { createMemoryState } from '@chat-adapter/state-memory'
 import { createRedisState } from '@chat-adapter/state-redis'
-import type { UserContent } from 'ai'
 import type { Message, MessageContext, Thread } from 'chat'
-import { defineChannel } from 'eve/channels'
+import { defineChannel, POST, type MessageContent } from 'eve/channels'
 import {
   chatSdkChannel,
   isNotImplemented,
-  messageToUserContent,
+  messageContentOf,
   type ChatSdkChannelState,
   type ChatSdkEventContext
 } from 'eve/channels/chat-sdk'
 import {
   discordUserAuth,
+  isAdminDiscordChannel,
   isAllowedDiscordChannel,
+  isAutoRespondDiscordChannel,
   isDiscordConfigured
-} from '../lib/discord-access.js'
-import { slackTextToDiscord, splitDiscordMessages } from '../lib/discord-format.js'
-import { withDiscordRetry } from '../lib/discord-retry.js'
+} from '../lib/discord/access.js'
+import { consumeDailyQuota, DAILY_LIMIT_MESSAGE } from '../lib/rate-limit.js'
+import { slackTextToDiscord, splitDiscordMessages } from '../lib/discord/format.js'
+import { withDiscordRetry } from '../lib/discord/retry.js'
 
 type PostableMessage = string | { raw: string } | { markdown: string } | Record<string, unknown>
 
@@ -85,8 +87,10 @@ function withSlackMrkdwnConversion(adapter: DiscordAdapter): DiscordAdapter {
 /** Mirror of eve's internal `clearStream` so the next step opens a fresh anchor. */
 function clearStream(state: ChatSdkChannelState): void {
   state.anchorMessageId = null
-  state.streamStepIndex = null
   state.lastEditAtMs = null
+  state.streamPartId = null
+  state.streamText = null
+  state.shownText = null
 }
 
 /** eve surfaces this as the typing status while tools run. */
@@ -100,13 +104,30 @@ function isHuman(message: Message): boolean {
   return !message.author.isMe && message.author.isBot !== true
 }
 
-function shouldDispatch(thread: Thread, message: Message): boolean {
+async function shouldDispatch(thread: Thread, message: Message): Promise<boolean> {
   if (!isHuman(message)) return false
-  const allowed = isAllowedDiscordChannel(thread.channelId)
+  const allowed = await isAllowedDiscordChannel(thread.channelId)
   if (!allowed) {
-    console.warn('[nuxi:discord] dropped mention: channel not in DISCORD_ALLOWED_CHANNELS', { channelId: thread.channelId })
+    console.warn('[nuxi:discord] dropped message: channel not in discord.channels', { channelId: thread.channelId })
   }
   return allowed
+}
+
+/**
+ * Public channels count each dispatched message against the sender's daily quota (admin
+ * channels don't), checked before the turn starts so the user gets a reply instead of silence.
+ */
+async function withinDailyQuota(thread: Thread, message: Message): Promise<boolean> {
+  if (await isAdminDiscordChannel(thread.channelId)) return true
+  if (await consumeDailyQuota(`discord:${message.author.userId}`) !== 'limited') return true
+  await thread.post(DAILY_LIMIT_MESSAGE)
+  return false
+}
+
+/** Gates `onNewMessage` below: only `discord.channels.autoRespond` answers without an `@mention`. */
+async function shouldAutoRespond(thread: Thread, message: Message): Promise<boolean> {
+  if (!isHuman(message)) return false
+  return isAutoRespondDiscordChannel(thread.channelId)
 }
 
 /**
@@ -120,14 +141,14 @@ function burstMessages(message: Message, context: MessageContext | undefined): M
 }
 
 /**
- * Folds a burst into one model input. `messageToUserContent` turns each
+ * Folds a burst into one model input. `messageContentOf` turns each
  * attachment into a file part, so an error screenshot posted on Discord reaches
  * the model instead of being reduced to its (often empty) message text.
  */
-function toUserContent(messages: readonly Message[]): string | UserContent {
+function toMessageContent(messages: readonly Message[]): MessageContent {
   const text = messages.map(message => message.text.trim()).filter(Boolean).join('\n\n')
   const files = messages.flatMap((message) => {
-    const content = messageToUserContent(message)
+    const content = messageContentOf(message)
     return Array.isArray(content) ? content.filter(part => part.type !== 'text') : []
   })
 
@@ -179,7 +200,7 @@ function createDiscordBridge() {
 
     const anchorId = channel.state.anchorMessageId
     let delivered = false
-    if (anchorId && channel.state.editSupported !== false) {
+    if (typeof anchorId === 'string' && anchorId && channel.state.editSupported !== false) {
       try {
         await editMessageRaw(thread.id, anchorId, { raw: firstPart })
         delivered = true
@@ -214,55 +235,84 @@ function createDiscordBridge() {
     // even a lone message by its debounce window.
     concurrency: 'queue',
     // Keep the Discord principal when a HITL button click resumes a session.
-    resolveInputAuth: event => discordUserAuth(event.user?.userId, event.user?.userName, event.thread?.channelId),
+    resolveInputAuth: event => discordUserAuth(event.user?.userId, event.user?.userName, event.user?.fullName, event.thread?.channelId),
     events: {
       // Same shape as eve's default handler, only the delivery is chunked.
-      async 'message.completed'(event, channel) {
-        if (event.finishReason === 'tool-calls') {
-          channel.state.pendingToolCallMessage = event.message ? firstNonEmptyLine(event.message) : null
-          if (event.message) await finalizeDiscordMessage(channel, event.message, false)
+      async 'content.completed'({ data }, { channel }) {
+        if (data.kind !== 'text') return
+        const text = typeof data.value === 'string' ? data.value : ''
+
+        if (data.phase !== 'reply') {
+          channel.state.pendingToolCallMessage = text ? firstNonEmptyLine(text) : null
+          if (text) await finalizeDiscordMessage(channel, text, false)
           else clearStream(channel.state)
           return
         }
 
         channel.state.pendingToolCallMessage = null
-        if (!event.message) {
+        if (!text) {
           clearStream(channel.state)
           return
         }
-        await finalizeDiscordMessage(channel, event.message, true)
+        await finalizeDiscordMessage(channel, text, true)
       }
     }
   })
 
   const { bot, send } = bridge
 
-  bot.onNewMention(async (thread: Thread, message: Message, context?: MessageContext) => {
-    if (!shouldDispatch(thread, message)) return
+  /**
+   * Subscribes to a freshly opened thread and sends its first turn to the model.
+   * Shared by `onNewMention` (renames the thread from the mention text) and
+   * `onNewMessage` (a Forum post already has its own title — never renamed).
+   */
+  async function dispatchNewThread(
+    thread: Thread,
+    message: Message,
+    context: MessageContext | undefined,
+    { renameThread }: { renameThread: boolean }
+  ): Promise<void> {
     await thread.subscribe()
+    if (!(await withinDailyQuota(thread, message))) return
 
     const turn = burstMessages(message, context)
-    // Title from the mention that opened the thread, not the newest message.
-    const title = threadTitleFromMessage(turn[0]?.text ?? message.text)
-    if (title) {
-      void bot.getAdapter('discord')?.setThreadTitle(thread.id, title)
-        .catch((error: unknown) => console.warn('[nuxi:discord] setThreadTitle failed', error))
+    if (renameThread) {
+      // Title from the mention that opened the thread, not the newest message.
+      const title = threadTitleFromMessage(turn[0]?.text ?? message.text)
+      if (title) {
+        void bot.getAdapter('discord')?.setThreadTitle(thread.id, title)
+          .catch((error: unknown) => console.warn('[nuxi:discord] setThreadTitle failed', error))
+      }
     }
 
     // Discord-specific behaviour lives in the always-on prompt, keyed on the
     // principal (`lib/surface-instructions.ts`) — passing it as `context` here
     // would prepend a fresh copy to history on every message.
     await send(
-      toUserContent(turn),
-      { thread, auth: discordUserAuth(message.author.userId, message.author.userName, thread.channelId) }
+      toMessageContent(turn),
+      { thread, auth: discordUserAuth(message.author.userId, message.author.userName, message.author.fullName, thread.channelId) }
     )
+  }
+
+  bot.onNewMention(async (thread: Thread, message: Message, context?: MessageContext) => {
+    if (!(await shouldDispatch(thread, message))) return
+    await dispatchNewThread(thread, message, context, { renameThread: true })
+  })
+
+  // No `@mention` required — gated to `discord.channels.autoRespond` (e.g. a Forum
+  // channel where every "New Post" is its own thread). Mutually exclusive with
+  // `onNewMention`: the Chat SDK routes a message to exactly one of the two.
+  bot.onNewMessage(/[\s\S]*/, async (thread: Thread, message: Message, context?: MessageContext) => {
+    if (!(await shouldAutoRespond(thread, message))) return
+    await dispatchNewThread(thread, message, context, { renameThread: false })
   })
 
   bot.onSubscribedMessage(async (thread: Thread, message: Message, context?: MessageContext) => {
-    if (!shouldDispatch(thread, message)) return
+    if (!(await shouldDispatch(thread, message))) return
+    if (!(await withinDailyQuota(thread, message))) return
     await send(
-      toUserContent(burstMessages(message, context)),
-      { thread, auth: discordUserAuth(message.author.userId, message.author.userName, thread.channelId) }
+      toMessageContent(burstMessages(message, context)),
+      { thread, auth: discordUserAuth(message.author.userId, message.author.userName, message.author.fullName, thread.channelId) }
     )
   })
 
@@ -288,7 +338,14 @@ const discordBridge: DiscordBridge | null = isDiscordConfigured()
 
 export const bot = discordBridge?.bot ?? null
 export const send = discordBridge?.send ?? null
-export const channel = discordBridge?.channel ?? defineChannel({ routes: [] })
+export const channel = discordBridge?.channel ?? defineChannel({
+  routes: [
+    POST('/eve/v1/discord', () => Response.json(
+      { error: 'Discord is not configured' },
+      { status: 503 }
+    ))
+  ]
+})
 
 /**
  * Post already-converted Discord markdown to a channel (no thread), skipping

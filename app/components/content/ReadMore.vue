@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { splitByCase, upperFirst } from 'scule'
+import { L10N_STRINGS } from '#shared/utils/l10n'
+
+defineOptions({ inheritAttrs: false })
 
 const props = defineProps({
   to: {
@@ -13,29 +15,21 @@ const props = defineProps({
   }
 })
 
-const createBreadcrumb = (link: string = 'Missing link') => {
-  if (link.startsWith('http')) {
-    return link
-  }
-  return link
-    .split('/')
-    .filter(Boolean)
-    .map(part =>
-      splitByCase(part)
-        .map(p => upperFirst(p))
-        .join(' ')
-    )
-    .join(' > ')
-    .replace('Api', 'API')
-}
+const attrs = useAttrs()
+const isTitleAttr = (name: string) => name.startsWith('data-l10n') || name === 'lang'
+const calloutAttrs = computed(() => Object.fromEntries(Object.entries(attrs).filter(([name]) => !isTitleAttr(name))))
+const titleAttrs = computed(() => Object.fromEntries(Object.entries(attrs).filter(([name]) => isTitleAttr(name))))
+
+const locale = useDocsLocale()
+const label = computed(() => locale.value ? L10N_STRINGS[locale.value].readMore : { before: 'Read more in ', after: '.' })
 
 const computedTitle = computed<string>(() => props.title || createBreadcrumb(props.to))
 </script>
 
 <template>
-  <ProseCallout icon="i-lucide-bookmark" :to="to" :aria-label="computedTitle">
+  <ProseCallout icon="i-lucide-bookmark" :to="to" :aria-label="computedTitle" v-bind="calloutAttrs">
     <slot mdc-unwrap="p">
-      Read more in <span class="font-bold" v-text="computedTitle" />.
+      {{ label.before }}<span class="font-bold" v-bind="titleAttrs" v-text="computedTitle" />{{ label.after }}
     </slot>
   </ProseCallout>
 </template>

@@ -1,13 +1,13 @@
 import { defineDynamic, defineTool } from 'eve/tools'
 import { z } from 'zod'
 import { NUXI_GATEWAY_TAG } from '../../shared/utils/ai-gateway.js'
-import { canAccessAdminMcp } from '../lib/admin-mcp-access.js'
+import { assertAdminMode, isAdminMode } from '../lib/identity/admin-mode.js'
 
 export const AI_GATEWAY_INSTRUCTIONS = `**AI Gateway tools (\`ai_gateway__*\`, admin only) — tokens, cost, model usage:**
 - \`ai_gateway__credits\` — current credit balance and lifetime spend for the **entire** nuxt-js team account (not Nuxi-only)
 - \`ai_gateway__report\` — spend/tokens over a date range. The Custom Reporting API is **account-wide**; this tool always scopes to Nuxi via tags (default \`${NUXI_GATEWAY_TAG}\`) and/or \`AI_GATEWAY_REPORT_API_KEY_NAME\`. Never quote unscoped account totals in digests.
 - \`ai_gateway__generation\` — cost, latency, and token usage for a single generation id (from a chat completion's \`id\` field)
-- Every Nuxi request also carries \`surface:web\` | \`surface:slack\` | \`surface:discord\` | \`surface:schedule\` | \`surface:eval\`, plus \`feature:<name>\` on scheduled workflows and background jobs. Use \`groupBy=tag\` to break spend down per channel — note traffic before this rolled out only has \`${NUXI_GATEWAY_TAG}\`.
+- Every Nuxi request also carries \`surface:web\` | \`surface:slack\` | \`surface:discord\` | \`surface:schedule\` | \`surface:cli\` | \`surface:eval\`, plus \`feature:<name>\` on scheduled workflows and background jobs. Use \`groupBy=tag\` to break spend down per channel — note traffic before this rolled out only has \`${NUXI_GATEWAY_TAG}\`.
 - Dashboard: https://vercel.com/nuxt-js/nuxt/ai-gateway
 - If a scoped report returns empty results (e.g. before tagging rolled out and no API key name configured), say spend is not attributable yet — do **not** fall back to account-wide totals.`
 
@@ -90,7 +90,8 @@ function aiGatewayTools() {
     credits: defineTool({
       description: 'Admin: AI Gateway credit balance and lifetime spend for the entire nuxt-js team account (not Nuxi-scoped). Prefer ai_gateway__report for Nuxi digests.',
       inputSchema: z.object({}),
-      async execute() {
+      async execute(_input, ctx) {
+        await assertAdminMode(ctx.session.auth.current)
         return await gatewayFetch('/credits')
       }
     }),
@@ -111,7 +112,8 @@ function aiGatewayTools() {
         message: 'startDate must not be later than endDate',
         path: ['startDate']
       }),
-      async execute(input) {
+      async execute(input, ctx) {
+        await assertAdminMode(ctx.session.auth.current)
         const configuredKeyName = reportApiKeyName()
         // Key-name scope covers historical untagged traffic on a dedicated Nuxi
         // key, but it spends the single `group_by` slot on `api_key_name` to do
@@ -178,18 +180,15 @@ function aiGatewayTools() {
       inputSchema: z.object({
         id: z.string().min(1).describe('Generation id, e.g. gen_01ARZ3NDEKTSV4RRFFQ69G5FAV')
       }),
-      async execute(input) {
+      async execute(input, ctx) {
+        await assertAdminMode(ctx.session.auth.current)
         return await gatewayFetch('/generation', { id: input.id })
       }
     })
   }
 }
 
-export default defineDynamic({
-  events: {
-    'session.started': async (_event, ctx) => {
-      if (!canAccessAdminMcp(ctx.session.auth.current)) return null
-      return aiGatewayTools()
-    }
-  }
+export default defineDynamic(async (ctx) => {
+  if (!(await ctx.memo(ctx.turn?.id ?? null, () => isAdminMode(ctx.session.auth.current)))) return null
+  return aiGatewayTools()
 })

@@ -32,13 +32,18 @@ In this default mode (`--ui-only`):
 |---------|--------------|
 | `pnpm dev` | UI-only mode — zero config, no Eve agent, ecosystem APIs proxied to nuxt.com |
 | `pnpm dev:nuxi` | UI-only mode + the Nuxi agent — spawns the Eve runtime (needs `AI_GATEWAY_API_KEY` and `INTERNAL_API_SECRET`) |
+| `pnpm nuxi` | Eve TUI only — `layers/nuxi`'s `dev` script (`eve dev`) |
 | `pnpm dev:full` | Full mode — spawns the Eve agent runtime and fetches the Nuxt ecosystem locally |
 
 `pnpm dev:full` requires some environment variables (see [`.env.example`](./.env.example), notably `AI_GATEWAY_API_KEY` for the agent). All variables in `.env.example` are optional and grouped by feature — only set what you need.
 
 ### Working on the docs
 
-The docs live in the [nuxt/nuxt](https://github.com/nuxt/nuxt) repository. To edit them locally, clone/fork the repo somewhere outside this project and point the `NUXT_V3_PATH` / `NUXT_V4_PATH` / `NUXT_V5_PATH` variables in your `.env` to your local checkout (use `pwd` — or `echo %cd%` on Windows — inside the clone to get the path). Same goes for `NUXT_EXAMPLES_PATH` with [nuxt/examples](https://github.com/nuxt/examples).
+The docs live in the [nuxt/nuxt](https://github.com/nuxt/nuxt) repository. To edit them locally, clone/fork the repo somewhere outside this project and point the `NUXT_V2_PATH` / `NUXT_V3_PATH` / `NUXT_V4_PATH` / `NUXT_V5_PATH` variables in your `.env` to your local checkout (use `pwd` — or `echo %cd%` on Windows — inside the clone to get the path). Same goes for `NUXT_EXAMPLES_PATH` with [nuxt/examples](https://github.com/nuxt/examples).
+
+### Previewing a pull request
+
+`/pull/:repo/:number` mirrors `github.com/nuxt/:repo/pull/:number`: it renders the site's content pages with that pull request's content (any other page redirects to production), and lands on the first page it changes. `:repo` is `nuxt`, `cli`, `examples` or `nuxt.com`, and the pull request's base branch picks which content it replaces (`nuxt/nuxt`'s `main` is the 5.x docs). Only open pull requests with the `preview:enabled` label can be previewed, and a push removes it: a maintainer adds it back once they have reviewed the new commits.
 
 ### Signing in locally
 
@@ -106,6 +111,8 @@ NUXT_PUBLIC_SITE_URL=http://localhost:3000
 
 pnpm dev:nuxi
 ```
+
+Eve TUI only (no Nuxt UI): `pnpm nuxi`. Symlink the root `.env` / `.env.local` into `layers/nuxi` so Eve picks them up. Set `NUXI_CLI_ADMIN=1` for admin tools (ignored when `VERCEL_ENV=production`). For **web chat** admin without being on the Nuxt core team, set `NUXT_ADMIN_GITHUB_LOGINS=your-github-login` and sign in with GitHub (also ignored in production — use Global Config `admin.githubLogins` there). Point at a running site with `pnpm nuxi -- http://localhost:3000`.
 
 On Vercel, configure **both** the `web` and `eve` services (`vercel.json`) with the same `INTERNAL_API_SECRET`, `AI_GATEWAY_API_KEY`, and database env vars.
 

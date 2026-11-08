@@ -1,15 +1,15 @@
 import type { GatewayProviderOptions } from '@ai-sdk/gateway'
 import type { ModelMessage } from 'ai'
-import type { AdminMcpAuthContext } from './admin-mcp-access.js'
-import { resolveSurface } from './surface.js'
-import { workflowSkillId } from './workflows.js'
+import { resolveContext, type AuthContext } from './identity/context.js'
+import { workflowSkillId } from './workflow/shared.js'
 import { NUXI_GATEWAY_TAG } from '../../shared/utils/ai-gateway.js'
 
 /**
  * Fallback chain for the primary model, only used when the primary fails — the
- * nominal path is unchanged. `claude-sonnet-4.5` accepts the same
- * `thinking.budgetTokens` as 4.6; `gemini-3.6-flash` ignores the `anthropic`
- * provider key and runs with its own default reasoning.
+ * nominal path is unchanged. Every link must accept the primary's adaptive
+ * thinking: `claude-sonnet-4.5` rejects it with a 400, `claude-sonnet-5.5`
+ * takes it as is, and `gemini-3.6-flash` ignores the `anthropic` provider key
+ * and runs with its own default reasoning.
  *
  * Both links are probed against the team's Gateway under `zeroDataRetention`,
  * which every request below sets: a model with no ZDR-attested provider throws
@@ -18,7 +18,7 @@ import { NUXI_GATEWAY_TAG } from '../../shared/utils/ai-gateway.js'
  * and could never have engaged. Nothing in the model catalog lets you check
  * this statically — `regions` reads like it should and does not.
  */
-const FALLBACK_MODELS = ['anthropic/claude-sonnet-4.5', 'google/gemini-3.6-flash']
+const FALLBACK_MODELS = ['anthropic/claude-sonnet-5.5', 'google/gemini-3.6-flash']
 
 /**
  * Schedules dispatch through Slack with an app principal, so the workflow is
@@ -26,7 +26,7 @@ const FALLBACK_MODELS = ['anthropic/claude-sonnet-4.5', 'google/gemini-3.6-flash
  * the first user message. Reading it back rather than matching a list of ids
  * means a new schedule is attributed without touching this file.
  */
-function resolveWorkflowSkill(messages: readonly ModelMessage[]): string | undefined {
+export function resolveWorkflowSkill(messages: readonly ModelMessage[]): string | undefined {
   const first = messages.find(message => message.role === 'user')
   if (!first) return undefined
 
@@ -35,10 +35,10 @@ function resolveWorkflowSkill(messages: readonly ModelMessage[]): string | undef
 }
 
 export function nuxiGatewayTags(
-  auth: AdminMcpAuthContext | null | undefined,
+  auth: AuthContext | null | undefined,
   messages: readonly ModelMessage[]
 ): string[] {
-  const surface = resolveSurface(auth)
+  const surface = resolveContext(auth).surface
   const tags = [NUXI_GATEWAY_TAG, `surface:${surface}`]
 
   if (surface === 'schedule') {
@@ -55,7 +55,7 @@ export function nuxiGatewayTags(
  * option the static config would have set.
  */
 export function nuxiGatewayOptions(
-  auth: AdminMcpAuthContext | null | undefined,
+  auth: AuthContext | null | undefined,
   messages: readonly ModelMessage[]
 ) {
   // Left unannotated on purpose: `providerOptions` is typed as `JsonObject`,

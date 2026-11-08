@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { Module } from '#shared/types'
+import type { Module, ModuleProvider } from '#shared/types'
+import { hasModuleDocs } from '#shared/utils/module-docs'
 
 const emit = defineEmits<{
   add: [module: Module]
@@ -10,6 +11,8 @@ const emit = defineEmits<{
 const props = withDefaults(
   defineProps<{
     module: Module
+    /** Provider that matched the search, shown when the module itself did not */
+    provider?: ModuleProvider
     showBadge?: boolean
     isAdded: boolean
     showAddButton?: boolean
@@ -103,8 +106,10 @@ const items = computed(() => [
     {
       icon: 'i-lucide-book',
       label: 'Documentation',
-      to: `${props.module.website}?utm_source=nuxt.com&utm_medium=aside-module&utm_campaign=nuxt.com`,
-      target: '_blank'
+      // Hosted docs live on the module page, not on the registry `website`.
+      ...(hasModuleDocs(props.module.name)
+        ? { to: `/modules/${props.module.name}` }
+        : { to: `${props.module.website}?utm_source=nuxt.com&utm_medium=aside-module&utm_campaign=nuxt.com`, target: '_blank' })
     },
     {
       label: 'View on GitHub',
@@ -167,6 +172,12 @@ const items = computed(() => [
       />
 
       <template #footer>
+        <p v-if="provider" class="flex items-center gap-1.5 mb-3 text-sm text-muted">
+          <!-- Keyed by name: Nuxt Icon's CSS mode writes a late-loading icon under the current name, so a reused instance can show the previous provider's icon. -->
+          <UIcon :key="provider.icon" :name="provider.icon || 'i-lucide-plug'" class="size-4 shrink-0" />
+          <span>Supports <span class="font-medium text-highlighted">{{ provider.label }}</span></span>
+        </p>
+
         <USeparator type="dashed" class="mb-4" />
 
         <div class="flex items-center justify-between gap-3 -my-1 text-muted">

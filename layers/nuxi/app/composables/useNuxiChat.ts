@@ -1,4 +1,3 @@
-import type { EveMessageData, UseEveAgentSnapshot } from 'eve/vue'
 import type { UIMessage } from 'ai'
 import { getMessageTextLength } from '../../shared/utils/paste-attachment'
 import {
@@ -15,8 +14,9 @@ import {
   seedChatDetailCache,
   uiMessagesToRows
 } from './useChatDetail'
-import { eveMessagesToUIMessages, hasVisibleParts } from './eve/adapter'
+import { hasVisibleParts } from './eve/adapter'
 import { useEveChat } from './eve/useEveChat'
+import type { EveChatFinish } from './eve/useEveChat'
 import { usePasteAttachment } from './usePasteAttachment'
 
 export type NuxiChatSendInput = string | { parts: UIMessage['parts'], persist?: boolean }
@@ -51,13 +51,10 @@ interface SyncChatOptions {
 }
 
 /** User messages are persisted at send time — only assistant output needs syncing. */
-async function syncChatToDb(id: string, messages: UIMessage[], session?: { sessionId?: string, streamIndex: number }) {
+async function syncChatToDb(id: string, messages: UIMessage[], cursor?: ChatSessionCursor) {
   const assistantMessages = messages.filter(
     message => message.role === 'assistant' && hasVisibleParts(message.parts)
   )
-  const cursor = session?.sessionId
-    ? { sessionId: session.sessionId, streamIndex: session.streamIndex }
-    : undefined
 
   if (!assistantMessages.length && !cursor) return
 
@@ -77,13 +74,11 @@ async function syncChatToDb(id: string, messages: UIMessage[], session?: { sessi
 }
 
 function createChatSyncHandler(options: SyncChatOptions) {
-  return async (snapshot: UseEveAgentSnapshot<EveMessageData>) => {
-    const messages = eveMessagesToUIMessages(snapshot.data.messages)
-
+  return async ({ messages, session }: EveChatFinish) => {
     if (options.loggedIn()) {
       try {
         const id = options.chatId()
-        const cursor = await syncChatToDb(id, messages, snapshot.session)
+        const cursor = await syncChatToDb(id, messages, session)
         patchChatDetailCache(id, {
           messages: uiMessagesToRows(messages.filter(message => message.role === 'assistant')),
           ...(cursor ? { sessionCursor: cursor } : {})
@@ -360,7 +355,6 @@ export function useNuxiChat(options: UseNuxiChatOptions) {
   })
 
   const eveChat = useEveChat({
-    chatId: options.chatId,
     initialMessages: seedMessages,
     sessionCursor: options.data?.value?.sessionCursor ?? options.sessionCursor ?? null,
     headers: buildEveHeaders(options.chatId),
@@ -376,6 +370,12 @@ export function useNuxiChat(options: UseNuxiChatOptions) {
       onTitle: options.onTitle,
       onFinish: options.onFinish
     })
+  })
+
+  // The server can stop a turn at the daily limit; resync so the limit banner shows.
+  watch(() => eveChat.status, (status, previous) => {
+    const wasBusy = previous === 'submitted' || previous === 'streaming'
+    if (wasBusy && status !== 'submitted' && status !== 'streaming') agent.refreshUsage()
   })
 
   const chat = {
@@ -501,7 +501,6 @@ export function useNuxiChat(options: UseNuxiChatOptions) {
     askQuestion,
     handlePaste: paste.handlePaste,
     removeAttachment: paste.removeAttachment,
-    restoreToInput: paste.restoreToInput,
     hasAgentUser: () => eveChat.hasAgentMessage('user'),
     readAnonymousTitle: () => readAnonymousTitle(chatId.value)
   }
